@@ -4,6 +4,8 @@ compatibility_flags = ["nodejs_compat"]
 main = ".open-next/worker.js"
 minify = true
 
+external = ["node:sqlite"]
+
 # 静态资源配置
 # Cloudflare Workers Assets 用于服务静态文件
 [assets]
