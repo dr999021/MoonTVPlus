@@ -29,116 +29,94 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install pnpm
-        run: npm install -g pnpm
+      # 优化：使用 pnpm/action-setup 安装并缓存 pnpm
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+          run_install: false
+
+      # 优化：缓存 pnpm 依赖
+      - name: Get pnpm store directory
+        id: pnpm-cache
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path)" >> $GITHUB_OUTPUT
+
+      - name: Cache pnpm dependencies
+        uses: actions/cache@v4
+        with:
+          path: ${{ steps.pnpm-cache.outputs.STORE_PATH }}
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
 
       - name: Install dependencies
         run: pnpm install
 
-      - name: Set environment variables
-        run: |
-          echo "BUILD_TARGET=cloudflare" >> $GITHUB_ENV
-          echo "NODE_ENV=production" >> $GITHUB_ENV
-          echo "NEXT_PUBLIC_STORAGE_TYPE=${{ secrets.NEXT_PUBLIC_STORAGE_TYPE }}" >> $GITHUB_ENV
-          echo "NEXT_PUBLIC_SITE_NAME=${{ secrets.NEXT_PUBLIC_SITE_NAME }}" >> $GITHUB_ENV
-          echo "NEXT_PUBLIC_SEARCH_MAX_PAGE=${{ secrets.NEXT_PUBLIC_SEARCH_MAX_PAGE }}" >> $GITHUB_ENV
-          echo "NEXT_PUBLIC_DOUBAN_PROXY_TYPE=${{ secrets.NEXT_PUBLIC_DOUBAN_PROXY_TYPE }}" >> $GITHUB_ENV
-          echo "NEXT_PUBLIC_DOUBAN_PROXY=${{ secrets.NEXT_PUBLIC_DOUBAN_PROXY }}" >> $GITHUB_ENV
-          echo "NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE=${{ secrets.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE }}" >> $GITHUB_ENV
-          echo "NEXT_PUBLIC_DOUBAN_IMAGE_PROXY=${{ secrets.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY }}" >> $GITHUB_ENV
-          echo "NEXT_PUBLIC_DISABLE_YELLOW_FILTER=${{ secrets.NEXT_PUBLIC_DISABLE_YELLOW_FILTER }}" >> $GITHUB_ENV
-          echo "NEXT_PUBLIC_FLUID_SEARCH=${{ secrets.NEXT_PUBLIC_FLUID_SEARCH }}" >> $GITHUB_ENV
-          echo "NEXT_PUBLIC_PROXY_M3U8_TOKEN=${{ secrets.NEXT_PUBLIC_PROXY_M3U8_TOKEN }}" >> $GITHUB_ENV
-          echo "NEXT_PUBLIC_DANMAKU_CACHE_EXPIRE_MINUTES=${{ secrets.NEXT_PUBLIC_DANMAKU_CACHE_EXPIRE_MINUTES }}" >> $GITHUB_ENV
-          echo "NEXT_PUBLIC_VOICE_CHAT_STRATEGY=${{ secrets.NEXT_PUBLIC_VOICE_CHAT_STRATEGY }}" >> $GITHUB_ENV
-          echo "NEXT_PUBLIC_ENABLE_OFFLINE_DOWNLOAD=${{ secrets.NEXT_PUBLIC_ENABLE_OFFLINE_DOWNLOAD }}" >> $GITHUB_ENV
-          echo "NEXT_PUBLIC_ENABLE_SOURCE_SEARCH=${{ secrets.NEXT_PUBLIC_ENABLE_SOURCE_SEARCH }}" >> $GITHUB_ENV
-          echo "USERNAME=${{ secrets.USERNAME }}" >> $GITHUB_ENV
-          echo "PASSWORD=${{ secrets.PASSWORD }}" >> $GITHUB_ENV
-          echo "UPSTASH_URL=${{ secrets.UPSTASH_URL }}" >> $GITHUB_ENV
-          echo "UPSTASH_TOKEN=${{ secrets.UPSTASH_TOKEN }}" >> $GITHUB_ENV
-          echo "TMDB_API_KEY=${{ secrets.TMDB_API_KEY }}" >> $GITHUB_ENV
-          echo "TMDB_PROXY=${{ secrets.TMDB_PROXY }}" >> $GITHUB_ENV
-          echo "TMDB_REVERSE_PROXY=${{ secrets.TMDB_REVERSE_PROXY }}" >> $GITHUB_ENV
-          echo "DANMAKU_API_BASE=${{ secrets.DANMAKU_API_BASE }}" >> $GITHUB_ENV
-          echo "DANMAKU_API_TOKEN=${{ secrets.DANMAKU_API_TOKEN }}" >> $GITHUB_ENV
-          echo "ANNOUNCEMENT=${{ secrets.ANNOUNCEMENT }}" >> $GITHUB_ENV
-          echo "CRON_PASSWORD=${{ secrets.CRON_PASSWORD }}" >> $GITHUB_ENV
-          echo "SITE_BASE=${{ secrets.SITE_BASE }}" >> $GITHUB_ENV
-          echo "REDIS_URL=${{ secrets.REDIS_URL }}" >> $GITHUB_ENV
-          echo "KVROCKS_URL=${{ secrets.KVROCKS_URL }}" >> $GITHUB_ENV
-          echo "INIT_CONFIG=${{ secrets.INIT_CONFIG }}" >> $GITHUB_ENV
-          echo "CONFIG_SUBSCRIPTION_URL=${{ secrets.CONFIG_SUBSCRIPTION_URL }}" >> $GITHUB_ENV
-          echo "ENABLE_TVBOX_SUBSCRIBE=${{ secrets.ENABLE_TVBOX_SUBSCRIBE }}" >> $GITHUB_ENV
-          echo "TVBOX_SUBSCRIBE_TOKEN=${{ secrets.TVBOX_SUBSCRIBE_TOKEN }}" >> $GITHUB_ENV
-          echo "WATCH_ROOM_ENABLED=${{ secrets.WATCH_ROOM_ENABLED }}" >> $GITHUB_ENV
-          echo "WATCH_ROOM_EXTERNAL_SERVER_AUTH=${{ secrets.WATCH_ROOM_EXTERNAL_SERVER_AUTH }}" >> $GITHUB_ENV
-          echo "WATCH_ROOM_EXTERNAL_SERVER_URL=${{ secrets.WATCH_ROOM_EXTERNAL_SERVER_URL }}" >> $GITHUB_ENV
-          echo "WATCH_ROOM_SERVER_TYPE=${{ secrets.WATCH_ROOM_SERVER_TYPE }}" >> $GITHUB_ENV
+      # 优化：使用 yq 工具修改 wrangler.toml（更安全）
+      - name: Install yq (for TOML editing)
+        uses: mikefarah/yq@v4
+        with:
+          version: 4.44.3
 
       - name: Configure D1 Database in wrangler.toml
+        shell: bash
         run: |
           STORAGE_TYPE="${{ secrets.NEXT_PUBLIC_STORAGE_TYPE }}"
           if [ "$STORAGE_TYPE" != "d1" ]; then
-            sed -i '/^# D1 数据库绑定$/,/^database_id = .*$/d' wrangler.toml
-            sed -i '/^\[\[d1_databases\]\]$/,/^$/{ /^\[\[d1_databases\]\]$/d; /^binding = /d; /^database_name = /d; /^database_id = /d; }' wrangler.toml
+            # 删除 D1 相关配置
+            yq -i 'del(.d1_databases)' wrangler.toml
           elif [ -n "${{ secrets.D1_DATABASE_ID }}" ]; then
-            sed -i 's/REPLACE_WITH_YOUR_D1_DATABASE_ID/${{ secrets.D1_DATABASE_ID }}/g' wrangler.toml
+            # 替换 D1 数据库 ID
+            yq -i '.d1_databases[0].database_id = "${{ secrets.D1_DATABASE_ID }}"' wrangler.toml
           else
+            echo "D1_DATABASE_ID is required when STORAGE_TYPE is d1"
             exit 1
           fi
 
-      - name: Update wrangler.toml
+      - name: Update wrangler.toml [vars] section
+        shell: bash
         run: |
-          append_var() {
-            local var_name=$1
-            local var_value=$2
-            if [ -n "$var_value" ]; then
-              echo "$var_name = \"$var_value\"" >> wrangler.toml
+          # 确保 [vars] 区块存在
+          if ! grep -q '^\[vars\]' wrangler.toml; then
+            echo "" >> wrangler.toml
+            echo "[vars]" >> wrangler.toml
+          fi
+          
+          # 定义需要添加的变量列表
+          VARS=(
+            "NEXT_PUBLIC_STORAGE_TYPE" "NEXT_PUBLIC_SITE_NAME" "NEXT_PUBLIC_SEARCH_MAX_PAGE"
+            "NEXT_PUBLIC_DOUBAN_PROXY_TYPE" "NEXT_PUBLIC_DOUBAN_PROXY"
+            "NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE" "NEXT_PUBLIC_DOUBAN_IMAGE_PROXY"
+            "NEXT_PUBLIC_DISABLE_YELLOW_FILTER" "NEXT_PUBLIC_FLUID_SEARCH"
+            "NEXT_PUBLIC_PROXY_M3U8_TOKEN" "NEXT_PUBLIC_DANMAKU_CACHE_EXPIRE_MINUTES"
+            "NEXT_PUBLIC_VOICE_CHAT_STRATEGY" "NEXT_PUBLIC_ENABLE_OFFLINE_DOWNLOAD"
+            "NEXT_PUBLIC_ENABLE_SOURCE_SEARCH" "USERNAME" "PASSWORD"
+            "UPSTASH_URL" "UPSTASH_TOKEN" "TMDB_API_KEY" "TMDB_PROXY"
+            "TMDB_REVERSE_PROXY" "DANMAKU_API_BASE" "DANMAKU_API_TOKEN"
+            "ANNOUNCEMENT" "CRON_PASSWORD" "SITE_BASE" "REDIS_URL"
+            "KVROCKS_URL" "INIT_CONFIG" "CONFIG_SUBSCRIPTION_URL"
+            "ENABLE_TVBOX_SUBSCRIBE" "TVBOX_SUBSCRIBE_TOKEN"
+            "WATCH_ROOM_ENABLED" "WATCH_ROOM_EXTERNAL_SERVER_AUTH"
+            "WATCH_ROOM_EXTERNAL_SERVER_URL" "WATCH_ROOM_SERVER_TYPE"
+          )
+          
+          # 遍历变量并添加到 [vars] 区块
+          for VAR in "${VARS[@]}"; do
+            VALUE="${!VAR:-}"
+            if [ -n "$VALUE" ]; then
+              # 使用 yq 写入变量（避免转义问题）
+              yq -i ".vars.$VAR = \"$VALUE\"" wrangler.toml
             fi
-          }
-          append_var "NEXT_PUBLIC_STORAGE_TYPE" "${{ secrets.NEXT_PUBLIC_STORAGE_TYPE }}"
-          append_var "NEXT_PUBLIC_SITE_NAME" "${{ secrets.NEXT_PUBLIC_SITE_NAME }}"
-          append_var "NEXT_PUBLIC_SEARCH_MAX_PAGE" "${{ secrets.NEXT_PUBLIC_SEARCH_MAX_PAGE }}"
-          append_var "NEXT_PUBLIC_DOUBAN_PROXY_TYPE" "${{ secrets.NEXT_PUBLIC_DOUBAN_PROXY_TYPE }}"
-          append_var "NEXT_PUBLIC_DOUBAN_PROXY" "${{ secrets.NEXT_PUBLIC_DOUBAN_PROXY }}"
-          append_var "NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE" "${{ secrets.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY_TYPE }}"
-          append_var "NEXT_PUBLIC_DOUBAN_IMAGE_PROXY" "${{ secrets.NEXT_PUBLIC_DOUBAN_IMAGE_PROXY }}"
-          append_var "NEXT_PUBLIC_DISABLE_YELLOW_FILTER" "${{ secrets.NEXT_PUBLIC_DISABLE_YELLOW_FILTER }}"
-          append_var "NEXT_PUBLIC_FLUID_SEARCH" "${{ secrets.NEXT_PUBLIC_FLUID_SEARCH }}"
-          append_var "NEXT_PUBLIC_PROXY_M3U8_TOKEN" "${{ secrets.NEXT_PUBLIC_PROXY_M3U8_TOKEN }}"
-          append_var "NEXT_PUBLIC_DANMAKU_CACHE_EXPIRE_MINUTES" "${{ secrets.NEXT_PUBLIC_DANMAKU_CACHE_EXPIRE_MINUTES }}"
-          append_var "NEXT_PUBLIC_VOICE_CHAT_STRATEGY" "${{ secrets.NEXT_PUBLIC_VOICE_CHAT_STRATEGY }}"
-          append_var "NEXT_PUBLIC_ENABLE_OFFLINE_DOWNLOAD" "${{ secrets.NEXT_PUBLIC_ENABLE_OFFLINE_DOWNLOAD }}"
-          append_var "NEXT_PUBLIC_ENABLE_SOURCE_SEARCH" "${{ secrets.NEXT_PUBLIC_ENABLE_SOURCE_SEARCH }}"
-          append_var "USERNAME" "${{ secrets.USERNAME }}"
-          append_var "PASSWORD" "${{ secrets.PASSWORD }}"
-          append_var "UPSTASH_URL" "${{ secrets.UPSTASH_URL }}"
-          append_var "UPSTASH_TOKEN" "${{ secrets.UPSTASH_TOKEN }}"
-          append_var "TMDB_API_KEY" "${{ secrets.TMDB_API_KEY }}"
-          append_var "TMDB_PROXY" "${{ secrets.TMDB_PROXY }}"
-          append_var "TMDB_REVERSE_PROXY" "${{ secrets.TMDB_REVERSE_PROXY }}"
-          append_var "DANMAKU_API_BASE" "${{ secrets.DANMAKU_API_BASE }}"
-          append_var "DANMAKU_API_TOKEN" "${{ secrets.DANMAKU_API_TOKEN }}"
-          append_var "ANNOUNCEMENT" "${{ secrets.ANNOUNCEMENT }}"
-          append_var "CRON_PASSWORD" "${{ secrets.CRON_PASSWORD }}"
-          append_var "SITE_BASE" "${{ secrets.SITE_BASE }}"
-          append_var "REDIS_URL" "${{ secrets.REDIS_URL }}"
-          append_var "KVROCKS_URL" "${{ secrets.KVROCKS_URL }}"
-          append_var "INIT_CONFIG" "${{ secrets.INIT_CONFIG }}"
-          append_var "CONFIG_SUBSCRIPTION_URL" "${{ secrets.CONFIG_SUBSCRIPTION_URL }}"
-          append_var ENABLE_TVBOX_SUBSCRIBE "${{ secrets.ENABLE_TVBOX_SUBSCRIBE }}"
-          append_var TVBOX_SUBSCRIBE_TOKEN "${{ secrets.TVBOX_SUBSCRIBE_TOKEN }}"
-          append_var WATCH_ROOM_ENABLED "${{ secrets.WATCH_ROOM_ENABLED }}"
-          append_var WATCH_ROOM_EXTERNAL_SERVER_AUTH "${{ secrets.WATCH_ROOM_EXTERNAL_SERVER_AUTH }}"
-          append_var WATCH_ROOM_EXTERNAL_SERVER_URL "${{ secrets.WATCH_ROOM_EXTERNAL_SERVER_URL }}"
-          append_var WATCH_ROOM_SERVER_TYPE "${{ secrets.WATCH_ROOM_SERVER_TYPE }}"
+          done
 
       - name: Build for Cloudflare
         run: pnpm run build:cloudflare
 
+      # 优化：指定 wrangler 版本，避免兼容性问题
       - name: Install Wrangler
-        run: npm install -g wrangler
+        run: npm install -g wrangler@3.78.12
 
       - name: Run D1 Migrations
         run: |
@@ -153,6 +131,5 @@ jobs:
             fi
           done
 
-      # ✅ 彻底弃用报错的 wrangler-action，直接用原生命令部署
       - name: Deploy directly with Wrangler
         run: wrangler deploy
