@@ -27,8 +27,12 @@ jobs:
         with:
           node-version: 22
 
-      - name: Install pnpm
-        run: npm install -g pnpm
+      # 🔥 修复 pnpm 全局目录问题
+      - name: Install pnpm & setup
+        run: |
+          npm install -g pnpm
+          pnpm setup
+          source ~/.bashrc
 
       - name: Install dependencies
         run: pnpm install
@@ -78,19 +82,17 @@ jobs:
         run: |
           STORAGE_TYPE="${{ secrets.NEXT_PUBLIC_STORAGE_TYPE }}"
           if [ "$STORAGE_TYPE" != "d1" ]; then
-            echo "Storage type is not d1 (current: $STORAGE_TYPE), removing D1 database configuration"
+            echo "Storage type is not d1, removing D1 config"
             sed -i '/^# D1 数据库绑定$/,/^database_id = .*$/d' wrangler.toml
             sed -i '/^\[\[d1_databases\]\]$/,/^$/{ /^\[\[d1_databases\]\]$/d; /^binding = /d; /^database_name = /d; /^database_id = /d; }' wrangler.toml
-            echo "D1 configuration removed from wrangler.toml"
           elif [ -n "${{ secrets.D1_DATABASE_ID }}" ]; then
             sed -i 's/REPLACE_WITH_YOUR_D1_DATABASE_ID/${{ secrets.D1_DATABASE_ID }}/g' wrangler.toml
-            echo "D1 Database ID replaced successfully"
           else
-            echo "⚠️ Storage type is d1 but D1_DATABASE_ID secret not set"
+            echo "⚠️ D1_DATABASE_ID not set"
             exit 1
           fi
 
-      - name: Update wrangler.toml with environment variables
+      - name: Update wrangler.toml
         run: |
           append_var() {
             local var_name=$1
@@ -135,25 +137,19 @@ jobs:
           append_var WATCH_ROOM_EXTERNAL_SERVER_AUTH "${{ secrets.WATCH_ROOM_EXTERNAL_SERVER_AUTH }}"
           append_var WATCH_ROOM_EXTERNAL_SERVER_URL "${{ secrets.WATCH_ROOM_EXTERNAL_SERVER_URL }}"
           append_var WATCH_ROOM_SERVER_TYPE "${{ secrets.WATCH_ROOM_SERVER_TYPE }}"
-          
-          echo "Updated wrangler.toml:"
-          cat wrangler.toml
 
       - name: Build for Cloudflare
         run: pnpm run build:cloudflare
 
-      - name: Install Wrangler
-        run: pnpm add -g wrangler
+      # 🔥 修复：改用 npm 安装 wrangler，彻底避开 pnpm 全局问题
+      - name: Install Wrangler with npm
+        run: npm install -g wrangler
 
-      - name: Run D1 Database Migrations
+      - name: Run D1 Migrations
         run: |
           STORAGE_TYPE="${{ secrets.NEXT_PUBLIC_STORAGE_TYPE }}"
-          if [ "$STORAGE_TYPE" != "d1" ]; then
-            echo "Storage type is not d1, skipping migrations"
-            exit 0
-          fi
-          if [ -z "${{ secrets.D1_DATABASE_ID }}" ]; then
-            echo "D1_DATABASE_ID not set"
+          if [ "$STORAGE_TYPE" != "d1" ] || [ -z "${{ secrets.D1_DATABASE_ID }}" ]; then
+            echo "Skip D1 migrations"
             exit 0
           fi
           for f in ./migrations/*.sql; do
@@ -165,7 +161,6 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
 
-      # ✅ 正确版本：v3，不是 v4！
       - name: Deploy to Cloudflare
         uses: cloudflare/wrangler-action@v3
         with:
