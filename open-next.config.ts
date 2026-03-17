@@ -36,6 +36,8 @@ const config: OpenNextConfig = {
     'node:punycode',
     'node:timers',
     'node:worker_threads',
+    // 👇 只加了这一行，修复报错
+    'node:sqlite'
   ],
   middleware: {
     external: true,
@@ -51,3 +53,4 @@ const config: OpenNextConfig = {
 };
 
 export default config;
+
