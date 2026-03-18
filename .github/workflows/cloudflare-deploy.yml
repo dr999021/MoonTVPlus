@@ -119,7 +119,7 @@ jobs:
 
       # 优化：指定 wrangler 版本，避免兼容性问题
       - name: Install Wrangler
-        run: npm install -g wrangler@3.78.12
+        run: npm install -g wrangler@4
 
       - name: Run D1 Migrations
         run: |
