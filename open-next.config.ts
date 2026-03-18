@@ -56,7 +56,3 @@ const config: OpenNextConfig = {
 };
 
 export default config;
-
-
-export default config;
-
