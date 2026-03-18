@@ -13,8 +13,8 @@ binding = "ASSETS"
 
 [[d1_databases]]
 binding = "DB"
-database_name = "your-database-name"
-database_id = "your-database-id"
+database_name = "dr990"
+database_id = "769320f7-932b-40c4-a2bd-0af2238ef1fb"
 
 [vars]
 NODE_ENV = "production"
