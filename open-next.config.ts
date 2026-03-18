@@ -48,8 +48,10 @@ const config: OpenNextConfig = {
       incrementalCache: 'dummy',
       tagCache: 'dummy',
       queue: 'dummy',
-    },
-  },
-};
+{
+  "build": {
+    "external": ["node:sqlite"]
+  }
+}
 
 export default config;
