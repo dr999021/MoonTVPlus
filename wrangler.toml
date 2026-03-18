@@ -4,13 +4,10 @@ compatibility_flags = ["nodejs_compat"]
 main = ".open-next/worker.js"
 minify = true
 
-# 静态资源配置
-# Cloudflare Workers Assets 用于服务静态文件
 [assets]
 directory = ".open-next/assets"
 binding = "ASSETS"
 
-# D1 数据库绑定
 [[d1_databases]]
 binding = "DB"
 database_name = "moontvplus"
@@ -19,3 +16,7 @@ database_id = "REPLACE_WITH_YOUR_D1_DATABASE_ID"
 [vars]
 NODE_ENV = "production"
 BUILD_TARGET = "cloudflare"
+
+# 👇 关键：这是 Wrangler 真正识别的 external 配置格式
+[build]
+external = ["node:sqlite"]
