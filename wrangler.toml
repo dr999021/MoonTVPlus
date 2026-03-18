@@ -4,6 +4,9 @@ compatibility_flags = ["nodejs_compat"]
 main = ".open-next/worker.js"
 minify = true
 
+[build]
+external = ["node:sqlite"]
+
 [assets]
 directory = ".open-next/assets"
 binding = "ASSETS"
