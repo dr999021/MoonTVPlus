@@ -36,7 +36,6 @@ const config: OpenNextConfig = {
     'node:punycode',
     'node:timers',
     'node:worker_threads',
-    // 👇 只加了这一行，修复报错
     'node:sqlite'
   ],
   middleware: {
@@ -50,7 +49,14 @@ const config: OpenNextConfig = {
       queue: 'dummy',
     },
   },
+  // 👇 👇 👇 必须加这个：直接控制 esbuild
+  esbuild: {
+    external: ['node:sqlite'],
+  },
 };
+
+export default config;
+
 
 export default config;
 
