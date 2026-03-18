@@ -111,6 +111,10 @@ jobs:
           done
 
       - name: Build for Cloudflare
+        env:
+          # 强行覆盖，优先级最高，绝对不让它用 sqlite
+          NEXT_PUBLIC_STORAGE_TYPE: d1
+          BUILD_TARGET: cloudflare
         run: pnpm run build:cloudflare
 
       # 优化：指定 wrangler 版本，避免兼容性问题
