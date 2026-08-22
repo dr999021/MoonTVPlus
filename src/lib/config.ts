@@ -313,6 +313,8 @@ async function getInitConfig(
         '',
       BangumiProxy: process.env.BANGUMI_PROXY || '',
       LiveChartProxy: process.env.LIVECHART_PROXY || '',
+      // 本地设置云同步模式（全局）：off=关闭 manual=手动 auto=自动
+      LocalSettingsSyncMode: 'off',
       // Pansou配置
       PansouApiUrl: '',
       PansouUsername: '',
@@ -571,6 +573,13 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
   }
   if (adminConfig.SiteConfig.LiveChartProxy === undefined) {
     adminConfig.SiteConfig.LiveChartProxy = process.env.LIVECHART_PROXY || '';
+  }
+  // 本地设置云同步模式兜底
+  if (
+    adminConfig.SiteConfig.LocalSettingsSyncMode !== 'manual' &&
+    adminConfig.SiteConfig.LocalSettingsSyncMode !== 'auto'
+  ) {
+    adminConfig.SiteConfig.LocalSettingsSyncMode = 'off';
   }
   // 确保评论开关存在
   if (adminConfig.SiteConfig.EnableComments === undefined) {

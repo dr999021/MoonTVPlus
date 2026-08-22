@@ -386,6 +386,7 @@ interface SiteConfig {
   LiveChartProxy?: string;
   BannerDataSource?: string;
   RecommendationDataSource?: string;
+  LocalSettingsSyncMode?: 'off' | 'manual' | 'auto';
   PansouApiUrl?: string;
   PansouUsername?: string;
   PansouPassword?: string;
@@ -10555,6 +10556,7 @@ const SiteConfigComponent = ({
     LiveChartProxy: '',
     BannerDataSource: 'Douban',
     RecommendationDataSource: 'Mixed',
+    LocalSettingsSyncMode: 'off',
     PansouApiUrl: '',
     PansouUsername: '',
     PansouPassword: '',
@@ -10684,6 +10686,7 @@ const SiteConfigComponent = ({
         BannerDataSource: config.SiteConfig.BannerDataSource || 'Douban',
         RecommendationDataSource:
           config.SiteConfig.RecommendationDataSource || 'Mixed',
+        LocalSettingsSyncMode: config.SiteConfig.LocalSettingsSyncMode || 'off',
         PansouApiUrl: config.SiteConfig.PansouApiUrl || '',
         PansouUsername: config.SiteConfig.PansouUsername || '',
         PansouPassword: config.SiteConfig.PansouPassword || '',
@@ -11226,6 +11229,37 @@ const SiteConfigComponent = ({
         </div>
         <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
           启用后搜索结果将实时流式返回,提升用户体验。
+        </p>
+      </div>
+
+      {/* 本地设置云同步模式 */}
+      <div>
+        <label className='block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2'>
+          本地设置云同步
+        </label>
+        <select
+          value={siteSettings.LocalSettingsSyncMode || 'off'}
+          onChange={(e) =>
+            setSiteSettings((prev) => ({
+              ...prev,
+              LocalSettingsSyncMode: e.target.value as
+                | 'off'
+                | 'manual'
+                | 'auto',
+            }))
+          }
+          className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-green-500 focus:border-transparent'
+        >
+          <option value='off'>关闭</option>
+          <option value='manual'>手动模式</option>
+          <option value='auto'>自动模式</option>
+        </select>
+        <p className='mt-1 text-xs text-gray-500 dark:text-gray-400'>
+          登录用户可把本地设置同步到云端，多设备保持一致。
+          <br />
+          手动模式：本地设置面板右上角出现「备份/恢复」按钮。
+          <br />
+          自动模式：进入网站自动拉取云端副本，打开本地设置面板时后台静默同步。
         </p>
       </div>
 
