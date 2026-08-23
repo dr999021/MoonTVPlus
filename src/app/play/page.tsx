@@ -1836,6 +1836,19 @@ function PlayPageClient() {
     return true;
   };
 
+  const isPlaybackThumbnailDisabled = () => {
+    if (typeof window === 'undefined') {
+      return true;
+    }
+
+    const saved = localStorage.getItem('disablePlaybackThumbnail');
+    if (saved !== null) {
+      return saved === 'true';
+    }
+
+    return true;
+  };
+
   const isDanmakuAutoLoadDisabled = () => {
     if (typeof window === 'undefined') {
       return false;
@@ -6897,6 +6910,19 @@ function PlayPageClient() {
           currentSourceRef.current
         );
       }
+      // switch 自身不回收上一个 HLS 实例，只有新地址仍是 m3u8 时 customType 才会接管并销毁它。
+      // 切到直链（mp4 等）时旧实例会残留并继续拉分片，所以这里统一先销毁。
+      const previousVideo = artPlayerRef.current.video as
+        | (HTMLVideoElement & { hls?: { destroy?: () => void } })
+        | undefined;
+      if (previousVideo?.hls) {
+        try {
+          previousVideo.hls.destroy?.();
+        } catch (err) {
+          console.warn('切换视频源时销毁旧 HLS 实例失败:', err);
+        }
+        delete previousVideo.hls;
+      }
       artPlayerRef.current.switch = videoUrl;
       artPlayerRef.current.title = `${videoTitle} - ${playerEpisodeLabel}`;
       artPlayerRef.current.poster = videoCover;
@@ -6942,7 +6968,7 @@ function PlayPageClient() {
           import('artplayer'),
           import('hls.js'),
           import('artplayer-plugin-danmuku'),
-          import('artplayer-plugin-auto-thumbnail'),
+          import('@/lib/artplayer-plugin-auto-thumbnail'),
         ]);
 
         const Artplayer = ArtplayerModule.default;
@@ -7389,12 +7415,15 @@ function PlayPageClient() {
             },
           },
           plugins: [
-            artplayerPluginAutoThumbnail({
-              url: videoUrl,
-              width: 160,
-              number: 100,
-              scale: 1,
-            }),
+            ...(isPlaybackThumbnailDisabled()
+              ? []
+              : [
+                  artplayerPluginAutoThumbnail({
+                    width: 160,
+                    number: 100,
+                    scale: 1,
+                  }),
+                ]),
             artplayerPluginDanmuku({
               danmuku: [],
               speed: danmakuSettingsRef.current.speed,

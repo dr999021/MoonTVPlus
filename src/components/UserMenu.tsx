@@ -213,6 +213,8 @@ export const UserMenu: React.FC = () => {
   const [nextEpisodePreCache, setNextEpisodePreCache] = useState(true);
   const [nextEpisodeDanmakuPreload, setNextEpisodeDanmakuPreload] =
     useState(true);
+  const [disablePlaybackThumbnail, setDisablePlaybackThumbnail] =
+    useState(true);
   const [disableAutoLoadDanmaku, setDisableAutoLoadDanmaku] = useState(false);
   const [danmakuMaxCount, setDanmakuMaxCount] = useState(5000);
   const [danmakuHeatmapDisabled, setDanmakuHeatmapDisabled] = useState(false);
@@ -780,6 +782,13 @@ export const UserMenu: React.FC = () => {
       );
       if (savedNextEpisodeDanmakuPreload !== null) {
         setNextEpisodeDanmakuPreload(savedNextEpisodeDanmakuPreload === 'true');
+      }
+
+      const savedDisablePlaybackThumbnail = localStorage.getItem(
+        'disablePlaybackThumbnail'
+      );
+      if (savedDisablePlaybackThumbnail !== null) {
+        setDisablePlaybackThumbnail(savedDisablePlaybackThumbnail === 'true');
       }
 
       const savedDisableAutoLoadDanmaku = localStorage.getItem(
@@ -2001,6 +2010,13 @@ export const UserMenu: React.FC = () => {
     }
   };
 
+  const handleDisablePlaybackThumbnailToggle = (value: boolean) => {
+    setDisablePlaybackThumbnail(value);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('disablePlaybackThumbnail', String(value));
+    }
+  };
+
   const handleDisableAutoLoadDanmakuToggle = (value: boolean) => {
     setDisableAutoLoadDanmaku(value);
     if (typeof window !== 'undefined') {
@@ -2174,6 +2190,7 @@ export const UserMenu: React.FC = () => {
     setBufferStrategy('medium');
     setNextEpisodePreCache(true);
     setNextEpisodeDanmakuPreload(true);
+    setDisablePlaybackThumbnail(true);
     const defaultDanmakuAutoLoad =
       (typeof window !== 'undefined' &&
         (window as any).RUNTIME_CONFIG?.DANMAKU_AUTO_LOAD_DEFAULT !== false) ||
@@ -2211,6 +2228,7 @@ export const UserMenu: React.FC = () => {
       localStorage.setItem('bufferStrategy', 'medium');
       localStorage.setItem('nextEpisodePreCache', 'true');
       localStorage.setItem('nextEpisodeDanmakuPreload', 'true');
+      localStorage.setItem('disablePlaybackThumbnail', 'true');
       localStorage.setItem(
         'disableAutoLoadDanmaku',
         String(!defaultDanmakuAutoLoad)
@@ -2380,6 +2398,9 @@ export const UserMenu: React.FC = () => {
       case 'nextEpisodeDanmakuPreload':
         setNextEpisodeDanmakuPreload(true);
         break;
+      case 'disablePlaybackThumbnail':
+        setDisablePlaybackThumbnail(true);
+        break;
       case 'disableAutoLoadDanmaku':
         setDisableAutoLoadDanmaku(
           (window as any).RUNTIME_CONFIG?.DANMAKU_AUTO_LOAD_DEFAULT === false
@@ -2510,6 +2531,9 @@ export const UserMenu: React.FC = () => {
           break;
         case 'nextEpisodeDanmakuPreload':
           setNextEpisodeDanmakuPreload(value === 'true');
+          break;
+        case 'disablePlaybackThumbnail':
+          setDisablePlaybackThumbnail(value === 'true');
           break;
         case 'disableAutoLoadDanmaku':
           setDisableAutoLoadDanmaku(value === 'true');
@@ -4560,6 +4584,34 @@ export const UserMenu: React.FC = () => {
                           checked={nextEpisodePreCache}
                           onChange={(e) =>
                             handleNextEpisodePreCacheToggle(e.target.checked)
+                          }
+                        />
+                        <div className='w-11 h-6 bg-gray-300 rounded-full peer-checked:bg-green-500 transition-colors dark:bg-gray-600'></div>
+                        <div className='absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform peer-checked:translate-x-5'></div>
+                      </div>
+                    </label>
+                  </div>
+
+                  {/* 禁用播放预览图 */}
+                  <div className='flex items-center justify-between'>
+                    <div>
+                      <h4 className='text-sm font-medium text-gray-700 dark:text-gray-300'>
+                        禁用播放预览图
+                      </h4>
+                      <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
+                        关闭后不再生成进度条悬停预览图。生成预览图需完整抽帧整个视频，流量开销较大，修改后重新进入播放页生效
+                      </p>
+                    </div>
+                    <label className='flex items-center cursor-pointer'>
+                      <div className='relative'>
+                        <input
+                          type='checkbox'
+                          className='sr-only peer'
+                          checked={disablePlaybackThumbnail}
+                          onChange={(e) =>
+                            handleDisablePlaybackThumbnailToggle(
+                              e.target.checked
+                            )
                           }
                         />
                         <div className='w-11 h-6 bg-gray-300 rounded-full peer-checked:bg-green-500 transition-colors dark:bg-gray-600'></div>
