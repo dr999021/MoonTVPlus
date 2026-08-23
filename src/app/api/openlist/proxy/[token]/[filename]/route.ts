@@ -4,6 +4,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { getAuthInfoFromCookie } from '@/lib/auth';
 import { getConfig } from '@/lib/config';
+import { db } from '@/lib/db';
 import { OpenListClient } from '@/lib/openlist.client';
 import {
   getCachedOpenListProxyUrl,
@@ -200,7 +201,6 @@ export async function GET(
       hasValidToken = true;
     } else {
       // 检查是否是用户token
-      const { db } = await import('@/lib/db');
       const username = await db.getUsernameByTvboxToken(requestToken);
       if (username) {
         // 检查用户是否被封禁
@@ -403,11 +403,6 @@ export async function GET(
             }
           }
         } catch (error) {
-          // 客户端断开连接或其他错误
-          console.log(
-            '[OpenList Proxy] 流传输中断:',
-            error instanceof Error ? error.message : 'Unknown error'
-          );
           // 取消上游 fetch，停止继续下载
           try {
             await reader.cancel();
