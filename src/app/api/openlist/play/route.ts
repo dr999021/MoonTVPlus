@@ -11,46 +11,83 @@ export const runtime = 'nodejs';
 
 /**
  * 使用 HEAD 请求跟随重定向获取最终 URL（直连方法 - 降级使用）
+ * HEAD 不支持（405/501）或请求异常时，降级使用 GET（带 Range 只取首字节）跟随重定向
  */
 async function getFinalUrl(url: string, maxRedirects = 5): Promise<string> {
   let currentUrl = url;
   let redirectCount = 0;
+  const userAgent =
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
 
   while (redirectCount < maxRedirects) {
+    let response: Response | null = null;
+
+    // 1) HEAD 请求跟随重定向
     try {
-      const response = await fetch(currentUrl, {
+      response = await fetch(currentUrl, {
         method: 'HEAD',
         redirect: 'manual',
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'User-Agent': userAgent,
         },
       });
+    } catch (error) {
+      console.log(
+        '[openlist/play] HEAD 请求失败，降级使用 GET:',
+        (error as Error).message
+      );
+    }
 
-      if (response.status >= 300 && response.status < 400) {
-        const location = response.headers.get('location');
-        if (!location) {
-          return currentUrl;
+    // 2) 部分服务器不支持 HEAD（返回 405/501 或直接抛错），用 GET 兜底
+    if (!response || response.status === 405 || response.status === 501) {
+      try {
+        response = await fetch(currentUrl, {
+          method: 'GET',
+          redirect: 'manual',
+          headers: {
+            'User-Agent': userAgent,
+            'Range': 'bytes=0-0',
+          },
+        });
+        // 只保留响应头用于跟随重定向，立即取消响应体避免下载整份内容
+        if (response.body) {
+          try {
+            await response.body.cancel();
+          } catch (e) {
+            // 忽略取消错误
+          }
         }
-
-        if (location.startsWith('http://') || location.startsWith('https://')) {
-          currentUrl = location;
-        } else if (location.startsWith('/')) {
-          const urlObj = new URL(currentUrl);
-          currentUrl = `${urlObj.protocol}//${urlObj.host}${location}`;
-        } else {
-          const urlObj = new URL(currentUrl);
-          const pathParts = urlObj.pathname.split('/');
-          pathParts.pop();
-          pathParts.push(location);
-          currentUrl = `${urlObj.protocol}//${urlObj.host}${pathParts.join('/')}`;
-        }
-
-        redirectCount++;
-      } else {
+      } catch (error) {
+        console.error('[openlist/play] 获取最终 URL 失败:', error);
         return currentUrl;
       }
-    } catch (error) {
-      console.error('[openlist/play] 获取最终 URL 失败:', error);
+    }
+
+    if (!response) {
+      return currentUrl;
+    }
+
+    if (response.status >= 300 && response.status < 400) {
+      const location = response.headers.get('location');
+      if (!location) {
+        return currentUrl;
+      }
+
+      if (location.startsWith('http://') || location.startsWith('https://')) {
+        currentUrl = location;
+      } else if (location.startsWith('/')) {
+        const urlObj = new URL(currentUrl);
+        currentUrl = `${urlObj.protocol}//${urlObj.host}${location}`;
+      } else {
+        const urlObj = new URL(currentUrl);
+        const pathParts = urlObj.pathname.split('/');
+        pathParts.pop();
+        pathParts.push(location);
+        currentUrl = `${urlObj.protocol}//${urlObj.host}${pathParts.join('/')}`;
+      }
+
+      redirectCount++;
+    } else {
       return currentUrl;
     }
   }
@@ -104,6 +141,38 @@ export async function GET(request: NextRequest) {
       folderPath,
       openListConfig.PathMeta
     );
+
+    // 路径开启了代理播放：直接返回服务器代理地址（代理端负责解析链接与缓存）
+    const { buildOpenListProxyUrl } = await import('@/lib/openlist-play-url');
+    const proxyUrl = pathMetaResolved.proxyPlay
+      ? buildOpenListProxyUrl({
+          token: 'proxy', // 固定 token，由登录 cookie 校验
+          folder: folderName,
+          fileName,
+        })
+      : '';
+
+    if (proxyUrl) {
+      if (format === 'json') {
+        return NextResponse.json({
+          url: proxyUrl,
+          refresh14m: false, // 代理链接稳定，无需 14 分钟续期
+          category: pathMetaResolved.category,
+          proxied: true,
+        });
+      }
+
+      // 默认返回重定向到代理地址（用于外部播放器）
+      const host =
+        request.headers.get('host') || request.headers.get('x-forwarded-host');
+      const proto =
+        request.headers.get('x-forwarded-proto') ||
+        (host?.includes('localhost') || host?.includes('127.0.0.1')
+          ? 'http'
+          : 'https');
+      const baseUrl = process.env.SITE_BASE || `${proto}://${host}`;
+      return NextResponse.redirect(`${baseUrl}${proxyUrl}`);
+    }
 
     const client = new OpenListClient(
       openListConfig.URL,

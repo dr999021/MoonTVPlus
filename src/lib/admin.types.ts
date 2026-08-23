@@ -183,6 +183,8 @@ export interface AdminConfig {
       [path: string]: {
         category: string; // 分类名
         refresh14m: boolean; // 该路径播放时是否启用 14 分钟 URL 续期
+        proxyPlay: boolean; // 该路径播放链接是否使用服务器代理播放
+        proxyCacheMinutes: number; // 代理播放时链接最终重定向的缓存时长（分钟），默认 60
       };
     };
   };

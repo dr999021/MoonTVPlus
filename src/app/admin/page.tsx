@@ -3484,7 +3484,13 @@ const OpenListConfigComponent = ({
   );
   const [disableVideoPreview, setDisableVideoPreview] = useState(false);
   const [pathMetaRows, setPathMetaRows] = useState<
-    Array<{ path: string; category: string; refresh14m: boolean }>
+    Array<{
+      path: string;
+      category: string;
+      refresh14m: boolean;
+      proxyPlay: boolean;
+      proxyCacheMinutes: number;
+    }>
   >([]);
   const [videos, setVideos] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
@@ -3496,6 +3502,9 @@ const OpenListConfigComponent = ({
   const [correctDialogOpen, setCorrectDialogOpen] = useState(false);
   const [selectedVideo, setSelectedVideo] = useState<any | null>(null);
   const [pathMetaDialogOpen, setPathMetaDialogOpen] = useState(false);
+  const [pathMetaExpanded, setPathMetaExpanded] = useState<Set<number>>(
+    new Set()
+  );
 
   useEffect(() => {
     if (config?.OpenListConfig) {
@@ -3531,6 +3540,12 @@ const OpenListConfigComponent = ({
           path,
           category: meta?.category || '',
           refresh14m: Boolean(meta?.refresh14m),
+          proxyPlay: Boolean(meta?.proxyPlay),
+          proxyCacheMinutes:
+            typeof meta?.proxyCacheMinutes === 'number' &&
+            meta.proxyCacheMinutes > 0
+              ? meta.proxyCacheMinutes
+              : 60,
         }))
       );
     }
@@ -3573,13 +3588,24 @@ const OpenListConfigComponent = ({
         }
         const pathMetaPayload: Record<
           string,
-          { category: string; refresh14m: boolean }
+          {
+            category: string;
+            refresh14m: boolean;
+            proxyPlay: boolean;
+            proxyCacheMinutes: number;
+          }
         > = {};
         for (const row of pathMetaRows) {
           const p = (row.path || '').trim();
           pathMetaPayload[p] = {
             category: (row.category || '').trim(),
             refresh14m: Boolean(row.refresh14m),
+            proxyPlay: Boolean(row.proxyPlay),
+            proxyCacheMinutes:
+              typeof row.proxyCacheMinutes === 'number' &&
+              row.proxyCacheMinutes > 0
+                ? Math.min(Math.max(Math.round(row.proxyCacheMinutes), 1), 1440)
+                : 60,
           };
         }
 
@@ -4112,7 +4138,8 @@ const OpenListConfigComponent = ({
               路径元信息
             </h3>
             <p className='text-xs text-gray-500 dark:text-gray-400 mt-1'>
-              为指定路径下的影片设置分类，以及播放时是否自动刷新链接（约 14 分钟）
+              为指定路径下的影片设置分类、播放时是否自动刷新链接（约 14 分钟），
+              以及是否通过服务器代理播放（可配置链接缓存时长）
               {pathMetaRows.length > 0
                 ? ` · 已配置 ${pathMetaRows.length} 条`
                 : ''}
@@ -4169,101 +4196,223 @@ const OpenListConfigComponent = ({
                       暂无配置，点击下方「添加」开始
                     </p>
                   ) : (
-                    pathMetaRows.map((row, index) => (
-                      <div
-                        key={index}
-                        className='grid grid-cols-1 md:grid-cols-12 gap-2 items-center'
-                      >
-                        <div className='md:col-span-5'>
-                          <input
-                            type='text'
-                            value={row.path}
-                            onChange={(e) => {
-                              const value = e.target.value;
-                              setPathMetaRows((rows) =>
-                                rows.map((r, i) =>
-                                  i === index ? { ...r, path: value } : r
-                                )
-                              );
-                            }}
-                            placeholder='路径，如 /videos'
-                            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent'
-                          />
-                        </div>
-                        <div className='md:col-span-3'>
-                          <input
-                            type='text'
-                            value={row.category}
-                            onChange={(e) => {
-                              const value = e.target.value;
-                              setPathMetaRows((rows) =>
-                                rows.map((r, i) =>
-                                  i === index ? { ...r, category: value } : r
-                                )
-                              );
-                            }}
-                            placeholder='分类，如 动漫'
-                            className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent'
-                          />
-                        </div>
-                        <div className='md:col-span-3 flex items-center gap-2'>
-                          <span className='text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap'>
-                            播放自动刷新
-                          </span>
-                          <button
-                            type='button'
-                            onClick={() =>
-                              setPathMetaRows((rows) =>
-                                rows.map((r, i) =>
-                                  i === index
-                                    ? { ...r, refresh14m: !r.refresh14m }
-                                    : r
-                                )
-                              )
-                            }
-                            className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${
-                              row.refresh14m
-                                ? 'bg-blue-600'
-                                : 'bg-gray-200 dark:bg-gray-700'
-                            }`}
-                            aria-label='播放自动刷新'
-                          >
-                            <span
-                              className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
-                                row.refresh14m
-                                  ? 'translate-x-6'
-                                  : 'translate-x-1'
-                              }`}
+                    pathMetaRows.map((row, index) => {
+                      const expanded = pathMetaExpanded.has(index);
+                      return (
+                        <div
+                          key={index}
+                          className='border border-gray-200 dark:border-gray-700 rounded-lg'
+                        >
+                          {/* 折叠头部：路径 + 展开箭头 + 删除 */}
+                          <div className='flex items-center gap-2 px-3 py-2'>
+                            <button
+                              type='button'
+                              onClick={() =>
+                                setPathMetaExpanded((prev) => {
+                                  const next = new Set(prev);
+                                  if (next.has(index)) {
+                                    next.delete(index);
+                                  } else {
+                                    next.add(index);
+                                  }
+                                  return next;
+                                })
+                              }
+                              className='flex-shrink-0 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200'
+                              aria-label={expanded ? '收起' : '展开'}
+                            >
+                              {expanded ? (
+                                <ChevronUp className='h-4 w-4' />
+                              ) : (
+                                <ChevronDown className='h-4 w-4' />
+                              )}
+                            </button>
+                            <input
+                              type='text'
+                              value={row.path}
+                              onChange={(e) => {
+                                const value = e.target.value;
+                                setPathMetaRows((rows) =>
+                                  rows.map((r, i) =>
+                                    i === index ? { ...r, path: value } : r
+                                  )
+                                );
+                              }}
+                              placeholder='路径，如 /videos'
+                              className='flex-1 min-w-0 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent'
                             />
-                          </button>
+                            <button
+                              type='button'
+                              onClick={() =>
+                                setPathMetaRows((rows) =>
+                                  rows.filter((_, i) => i !== index)
+                                )
+                              }
+                              className='flex-shrink-0 px-2 py-1 text-sm text-red-600 hover:text-red-700 dark:text-red-400'
+                            >
+                              删除
+                            </button>
+                          </div>
+
+                          {/* 展开配置区：分类、自动刷新、代理播放、代理缓存时长 */}
+                          {expanded && (
+                            <div className='border-t border-gray-200 dark:border-gray-700 px-3 py-3 space-y-3'>
+                              <div>
+                                <label className='block text-xs text-gray-500 dark:text-gray-400 mb-1'>
+                                  分类
+                                </label>
+                                <input
+                                  type='text'
+                                  value={row.category}
+                                  onChange={(e) => {
+                                    const value = e.target.value;
+                                    setPathMetaRows((rows) =>
+                                      rows.map((r, i) =>
+                                        i === index
+                                          ? { ...r, category: value }
+                                          : r
+                                      )
+                                    );
+                                  }}
+                                  placeholder='分类，如 动漫'
+                                  className='w-full px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent'
+                                />
+                              </div>
+
+                              <div className='flex items-center justify-between'>
+                                <span className='text-sm text-gray-700 dark:text-gray-300'>
+                                  播放自动刷新
+                                  <span className='block text-xs text-gray-400 dark:text-gray-500'>
+                                    播放时约 14 分钟自动刷新链接
+                                  </span>
+                                </span>
+                                <button
+                                  type='button'
+                                  onClick={() =>
+                                    setPathMetaRows((rows) =>
+                                      rows.map((r, i) =>
+                                        i === index
+                                          ? {
+                                              ...r,
+                                              refresh14m: !r.refresh14m,
+                                            }
+                                          : r
+                                      )
+                                    )
+                                  }
+                                  className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${
+                                    row.refresh14m
+                                      ? 'bg-blue-600'
+                                      : 'bg-gray-200 dark:bg-gray-700'
+                                  }`}
+                                  aria-label='播放自动刷新'
+                                >
+                                  <span
+                                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                                      row.refresh14m
+                                        ? 'translate-x-6'
+                                        : 'translate-x-1'
+                                    }`}
+                                  />
+                                </button>
+                              </div>
+
+                              <div className='flex items-center justify-between'>
+                                <span className='text-sm text-gray-700 dark:text-gray-300'>
+                                  代理播放
+                                  <span className='block text-xs text-gray-400 dark:text-gray-500'>
+                                    播放链接通过服务器代理
+                                  </span>
+                                </span>
+                                <button
+                                  type='button'
+                                  onClick={() =>
+                                    setPathMetaRows((rows) =>
+                                      rows.map((r, i) =>
+                                        i === index
+                                          ? {
+                                              ...r,
+                                              proxyPlay: !r.proxyPlay,
+                                            }
+                                          : r
+                                      )
+                                    )
+                                  }
+                                  className={`relative inline-flex h-6 w-11 flex-shrink-0 items-center rounded-full transition-colors ${
+                                    row.proxyPlay
+                                      ? 'bg-blue-600'
+                                      : 'bg-gray-200 dark:bg-gray-700'
+                                  }`}
+                                  aria-label='代理播放'
+                                >
+                                  <span
+                                    className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                                      row.proxyPlay
+                                        ? 'translate-x-6'
+                                        : 'translate-x-1'
+                                    }`}
+                                  />
+                                </button>
+                              </div>
+
+                              <div className='flex items-center gap-2'>
+                                <label className='text-sm text-gray-700 dark:text-gray-300 whitespace-nowrap'>
+                                  代理缓存时长（分钟）
+                                </label>
+                                <input
+                                  type='number'
+                                  min={1}
+                                  max={1440}
+                                  value={row.proxyCacheMinutes}
+                                  onChange={(e) => {
+                                    const value = parseInt(e.target.value, 10);
+                                    setPathMetaRows((rows) =>
+                                      rows.map((r, i) =>
+                                        i === index
+                                          ? {
+                                              ...r,
+                                              proxyCacheMinutes:
+                                                Number.isFinite(value)
+                                                  ? value
+                                                  : 60,
+                                            }
+                                          : r
+                                      )
+                                    );
+                                  }}
+                                  placeholder='60'
+                                  className='w-24 px-3 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 text-sm focus:ring-2 focus:ring-blue-500 focus:border-transparent'
+                                />
+                              </div>
+                            </div>
+                          )}
                         </div>
-                        <div className='md:col-span-1 flex justify-end'>
-                          <button
-                            type='button'
-                            onClick={() =>
-                              setPathMetaRows((rows) =>
-                                rows.filter((_, i) => i !== index)
-                              )
-                            }
-                            className='px-2 py-1 text-sm text-red-600 hover:text-red-700 dark:text-red-400'
-                          >
-                            删除
-                          </button>
-                        </div>
-                      </div>
-                    ))
+                      );
+                    })
                   )}
                 </div>
 
                 <div className='flex items-center justify-between gap-3 px-5 py-4 border-t border-gray-200 dark:border-gray-700'>
                   <button
                     type='button'
-                    onClick={() =>
+                    onClick={() => {
                       setPathMetaRows((rows) => [
                         ...rows,
-                        { path: '', category: '', refresh14m: false },
-                      ])
-                    }
+                        {
+                          path: '',
+                          category: '',
+                          refresh14m: false,
+                          proxyPlay: false,
+                          proxyCacheMinutes: 60,
+                        },
+                      ]);
+                      // 新添加的行默认展开，便于直接配置
+                      setPathMetaExpanded((prev) => {
+                        const next = new Set(prev);
+                        next.add(pathMetaRows.length);
+                        return next;
+                      });
+                    }}
                     className={buttonStyles.primary}
                   >
                     添加

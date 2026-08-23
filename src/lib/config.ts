@@ -729,6 +729,24 @@ export function configSelfCheck(adminConfig: AdminConfig): AdminConfig {
     }
     if (adminConfig.OpenListConfig.PathMeta === undefined) {
       adminConfig.OpenListConfig.PathMeta = {};
+    } else {
+      // 补齐新字段默认值（代理播放开关、缓存时长）
+      // 旧配置可能缺少新字段，运行期做兜底（类型上已声明为必填）
+      for (const entry of Object.values(
+        adminConfig.OpenListConfig.PathMeta
+      ) as Array<{
+        category: string;
+        refresh14m: boolean;
+        proxyPlay?: boolean;
+        proxyCacheMinutes?: number;
+      }>) {
+        if (entry.proxyPlay === undefined) {
+          entry.proxyPlay = false;
+        }
+        if (entry.proxyCacheMinutes === undefined) {
+          entry.proxyCacheMinutes = 60;
+        }
+      }
     }
   }
 
