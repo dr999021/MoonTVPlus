@@ -11,7 +11,7 @@ export const runtime = 'nodejs';
 
 /**
  * 使用 HEAD 请求跟随重定向获取最终 URL（直连方法 - 降级使用）
- * HEAD 不支持（405/501）或请求异常时，降级使用 GET（带 Range 只取首字节）跟随重定向
+ * HEAD 不支持（405/501）或请求异常时，降级使用普通 GET（无 Range）让 fetch 跟随重定向
  */
 async function getFinalUrl(url: string, maxRedirects = 5): Promise<string> {
   let currentUrl = url;
@@ -22,7 +22,7 @@ async function getFinalUrl(url: string, maxRedirects = 5): Promise<string> {
   while (redirectCount < maxRedirects) {
     let response: Response | null = null;
 
-    // 1) HEAD 请求跟随重定向
+    // 1) HEAD 请求跟随重定向（无响应体，成本低）
     try {
       response = await fetch(currentUrl, {
         method: 'HEAD',
@@ -38,25 +38,27 @@ async function getFinalUrl(url: string, maxRedirects = 5): Promise<string> {
       );
     }
 
-    // 2) 部分服务器不支持 HEAD（返回 405/501 或直接抛错），用 GET 兜底
+    // 2) 部分服务器不支持 HEAD（返回 405/501 或直接抛错），用普通 GET 兜底
+    //    不带 Range（可能被服务器拒绝），直接让 fetch 跟随重定向，取 response.url 为最终地址
     if (!response || response.status === 405 || response.status === 501) {
       try {
-        response = await fetch(currentUrl, {
+        const getResponse = await fetch(currentUrl, {
           method: 'GET',
-          redirect: 'manual',
+          redirect: 'follow',
           headers: {
             'User-Agent': userAgent,
-            'Range': 'bytes=0-0',
           },
         });
-        // 只保留响应头用于跟随重定向，立即取消响应体避免下载整份内容
-        if (response.body) {
+        const finalUrl = getResponse.url || currentUrl;
+        // 只取响应头，立即取消响应体避免下载整份内容
+        if (getResponse.body) {
           try {
-            await response.body.cancel();
+            await getResponse.body.cancel();
           } catch (e) {
             // 忽略取消错误
           }
         }
+        return getResponse.status < 400 ? finalUrl : currentUrl;
       } catch (error) {
         console.error('[openlist/play] 获取最终 URL 失败:', error);
         return currentUrl;
