@@ -12,6 +12,19 @@ set -e
 PUID="${PUID:-1001}"
 PGID="${PGID:-1001}"
 
+# 仅当目录属主与目标不一致时才递归修正，避免每次启动全量遍历。
+# 顶层目录属主匹配即视为无需处理（挂载卷通常整体属主一致）。
+fix_owner() {
+  dir="$1"
+  [ -d "$dir" ] || return 0
+  cur="$(stat -c '%u:%g' "$dir" 2>/dev/null)" || return 0
+  if [ "$cur" != "${PUID}:${PGID}" ]; then
+    echo "docker-entrypoint: fixing ownership of ${dir} (${cur} -> ${PUID}:${PGID})"
+    chown -R nextjs:nodejs "$dir" 2>/dev/null || \
+      echo "docker-entrypoint: warning: failed to chown ${dir}" >&2
+  fi
+}
+
 if [ "$(id -u)" = "0" ]; then
   echo "docker-entrypoint: adjusting UID=${PUID} GID=${PGID}"
 
@@ -21,14 +34,20 @@ if [ "$(id -u)" = "0" ]; then
   addgroup -g "${PGID}" -S nodejs
   adduser -u "${PUID}" -D -S -G nodejs nextjs
 
-  # 修正应用目录与数据目录属主。
-  # 应用运行时需写入 /app 下的 public（manifest）、.data（SQLite）、.next（缓存）等；
-  # /data 为默认离线下载目录，也可能是宿主机挂载卷，同样一并修正。
-  for dir in /app /data "${OFFLINE_DOWNLOAD_DIR:-/data}"; do
-    if [ -d "$dir" ]; then
-      chown -R nextjs:nodejs "$dir" 2>/dev/null || \
-        echo "docker-entrypoint: warning: failed to chown ${dir}" >&2
-    fi
+  # /app 中仅应用运行时可写的子目录需要修正属主：
+  # public（manifest）、.data（SQLite）、.next（缓存）。
+  # 默认 1001 时镜像构建已通过 --chown 设置正确属主，无需任何处理；
+  # 仅当 PUID/PGID 非默认值时才修正这些子目录。
+  if [ "$PUID" != "1001" ] || [ "$PGID" != "1001" ]; then
+    for d in /app/.data /app/.next /app/public; do
+      fix_owner "$d"
+    done
+  fi
+
+  # 数据目录（可能是宿主机挂载卷）：仅在属主不匹配时修正。
+  # /data 为默认离线下载目录，OFFLINE_DOWNLOAD_DIR 可另行指定。
+  for dir in /data "${OFFLINE_DOWNLOAD_DIR:-/data}"; do
+    fix_owner "$dir"
   done
 
   # 降权执行实际命令
