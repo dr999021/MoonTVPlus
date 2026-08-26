@@ -59,6 +59,64 @@ async function getFinalUrl(url: string, maxRedirects = 5): Promise<string> {
 }
 
 /**
+ * 探测播放 URL 的媒体类型，供前端分流（mkv/mp4 等单文件直链由浏览器原生播放，
+ * 避免无扩展名直链被误判为 m3u8 走 HLS 解析导致播放失败）：
+ * - hls：m3u8/fmp4 流
+ * - file：单文件视频容器（浏览器 <video> no-cors 可直接播放）
+ * - unknown：无法判断（前端回退到 URL 扩展名逻辑）
+ */
+async function detectOpenListMediaType(
+  playUrl: string
+): Promise<'hls' | 'file' | 'unknown'> {
+  try {
+    const path = playUrl.split('?')[0].toLowerCase();
+    if (/\.m3u8?$/i.test(path) || path.includes('m3u8')) return 'hls';
+    if (/\.(mp4|mkv|webm|mov|avi|m4v|flv|ts|mpeg|mpg|3gp|rmvb|rm|wmv|vob)$/i.test(path)) {
+      return 'file';
+    }
+  } catch {
+    return 'unknown';
+  }
+
+  const abortController = new AbortController();
+  const timer = setTimeout(() => abortController.abort(), 6000);
+  try {
+    const response = await fetch(playUrl, {
+      headers: {
+        'user-agent':
+          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        accept: '*/*',
+        range: 'bytes=0-0',
+      },
+      redirect: 'follow',
+      signal: abortController.signal,
+    });
+    if (response.status !== 200 && response.status !== 206) {
+      return 'unknown';
+    }
+    const contentType = (response.headers.get('content-type') || '')
+      .split(';')[0]
+      .trim()
+      .toLowerCase();
+    if (
+      contentType.includes('mpegurl') ||
+      contentType === 'application/x-mpegurl' ||
+      contentType.includes('x-mpegurl')
+    ) {
+      return 'hls';
+    }
+    if (contentType.startsWith('video/') || contentType === 'application/octet-stream') {
+      return 'file';
+    }
+    return 'unknown';
+  } catch {
+    return 'unknown';
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * GET /api/openlist/play?folder=xxx&fileName=xxx&format=json
  * 获取单个视频文件的播放链接（优先使用视频预览流，失败时降级到直连）
  * format=json: 返回 JSON 格式（用于 play 页面）
@@ -138,6 +196,7 @@ export async function GET(request: NextRequest) {
 
         return NextResponse.json({
           url: finalUrl,
+          mediaType: await detectOpenListMediaType(finalUrl),
           refresh14m: pathMetaResolved.refresh14m,
           category: pathMetaResolved.category,
         });
@@ -192,6 +251,9 @@ export async function GET(request: NextRequest) {
 
         return NextResponse.json({
           url: resolvedQualities[0].url,
+          mediaType: await detectOpenListMediaType(
+            resolvedQualities[0].url
+          ),
           qualities: resolvedQualities,
           refresh14m: pathMetaResolved.refresh14m,
           category: pathMetaResolved.category,
@@ -229,6 +291,7 @@ export async function GET(request: NextRequest) {
 
         return NextResponse.json({
           url: finalUrl,
+          mediaType: await detectOpenListMediaType(finalUrl),
           refresh14m: pathMetaResolved.refresh14m,
           category: pathMetaResolved.category,
         });

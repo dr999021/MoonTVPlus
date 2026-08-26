@@ -780,7 +780,12 @@ function PlayPageClient() {
     source?: string | null
   ) => {
     if (!video) return;
-    if (needsPrivateSourceCrossOrigin(source ?? currentSourceRef.current)) {
+    // 单文件直链（openlist 等探测为 file）：不加 crossorigin=anonymous，
+    // 否则跨域 CDN 无 ACAO 时原生播放也会被 CORS 拦截。
+    if (
+      needsPrivateSourceCrossOrigin(source ?? currentSourceRef.current) &&
+      videoMediaTypeRef.current !== 'file'
+    ) {
       if (video.crossOrigin !== 'anonymous') {
         video.crossOrigin = 'anonymous';
       }
@@ -1624,6 +1629,7 @@ function PlayPageClient() {
   const lastRefreshTimeRef = useRef(0); // 上次刷新时间
   const refreshTimerRef = useRef<NodeJS.Timeout | null>(null); // 14分钟定时器
   const currentXiaoyaUrlRef = useRef<string>(''); // 当前xiaoya原始URL（用于刷新）
+  const videoMediaTypeRef = useRef<'hls' | 'file' | ''>(''); // 播放链接媒体类型（openlist 探测后注入，用于单文件直连分流）
   const isInitialLoadRef = useRef(true); // 标记是否为首次加载
   // xiaoya 仅 m3u8 可续期；openlist 由 refresh14m 决定。用于 startRefreshTimer 自身兜底校验
   const linkRefreshEligibleRef = useRef(false);
@@ -2492,6 +2498,15 @@ function PlayPageClient() {
     // 获取当前集数的播放地址
     let episodeUrl = detail.episodes[currentEpisodeIndex];
     if (!episodeUrl) {
+      return;
+    }
+
+    // openlist 的 lazy 播放地址或已确认的单文件直链（如 mkv），解析前无法探测分辨率（内部 hls.js XHR 还会触发 CORS 误报），跳过
+    if (
+      episodeUrl.startsWith('/api/openlist/play') ||
+      videoMediaTypeRef.current === 'file'
+    ) {
+      setCurrentSourceVideoInfo(null);
       return;
     }
 
@@ -3530,6 +3545,13 @@ function PlayPageClient() {
         }
         if (data.url) {
           newUrl = data.url;
+          // 记录服务端探测出的媒体类型（openlist: hls/file），供单文件直连分流
+          if (originalLazyUrl.startsWith('/api/openlist/play')) {
+            videoMediaTypeRef.current =
+              data.mediaType === 'hls' || data.mediaType === 'file'
+                ? data.mediaType
+                : '';
+          }
           // play 响应可带回 refresh14m，覆盖 detail（配置热更新后仍一致）
           if (originalLazyUrl.startsWith('/api/openlist/play')) {
             const refresh14m =
@@ -3864,9 +3886,10 @@ function PlayPageClient() {
       (/Safari/i.test(userAgent) &&
         !/Chrome|Chromium|Edg|OPR|Android/i.test(userAgent));
     const isHlsLikeSource =
-      /\.m3u8?($|\?)/i.test(url) ||
-      url.includes('/api/proxy-m3u8') ||
-      url.includes('/api/proxy/vod/m3u8');
+      videoMediaTypeRef.current !== 'file' &&
+      (/\.m3u8?($|\?)/i.test(url) ||
+        url.includes('/api/proxy-m3u8') ||
+        url.includes('/api/proxy/vod/m3u8'));
 
     if (isSafari && isHlsJsActive && isHlsLikeSource) {
       // HLS 由 hls.js 接管时，不能再给 <video> 塞原始 m3u8 source，
@@ -6865,6 +6888,8 @@ function PlayPageClient() {
     // Artplayer 通过 URL 扩展名自动检测类型，但代理 URL（如 /api/proxy-m3u8?url=...）没有 .m3u8 扩展名
     const getVideoType = (url: string): string | undefined => {
       if (!url) return undefined;
+      // 单文件直链（mkv/mp4 等，mediaType=file）：走原生播放，勿强声明 m3u8
+      if (videoMediaTypeRef.current === 'file') return undefined;
       // 如果 URL 路径中已包含 .m3u8 扩展名，Artplayer 可自动检测，无需显式设置
       const urlPath = url.split('?')[0];
       if (urlPath.includes('.m3u8')) return undefined;
@@ -7142,7 +7167,9 @@ function PlayPageClient() {
             'webkit-playsinline': 'true',
             referrerpolicy: 'no-referrer',
             // 私人影库跨域直链：配合同级 moontvplus-extension 注入 ACAO，供 Anime4K 读帧
-            ...(needsPrivateSourceCrossOrigin(currentSourceRef.current)
+            // 单文件直链（mediaType=file）不加 crossorigin，避免无 ACAO 的 CDN 直链原生播放被 CORS 拦
+            ...(needsPrivateSourceCrossOrigin(currentSourceRef.current) &&
+            videoMediaTypeRef.current !== 'file'
               ? { crossOrigin: 'anonymous' }
               : {}),
           } as any,
