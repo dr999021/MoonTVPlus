@@ -7,6 +7,7 @@ import {
   MusicV2HistoryRecord,
   MusicV2PlaylistItem,
   MusicV2PlaylistRecord,
+  sortMusicV2History,
 } from './music-v2';
 import { RedisAdapter } from './redis-adapter';
 import { Favorite, IStorage, LocalSettingsSyncRecord, Notification, PlayRecord, PushSubscriptionRecord, SetLocalSettingsSyncOptions, SetLocalSettingsSyncResult, SkipConfig } from './types';
@@ -760,19 +761,12 @@ export abstract class BaseRedisStorage implements IStorage {
       this.adapter.hGetAll(this.musicV2HistoryKey(userName))
     );
 
-    return (
+    // 按队列顺序返回（sortOrder 优先，遗留记录回退到 createdAt）；
+    // 当前播放项由最大 lastPlayedAt 决定，不参与排序。
+    return sortMusicV2History(
       Object.values(rows || {})
         .filter(Boolean)
         .map((value) => JSON.parse(value as string) as MusicV2HistoryRecord)
-        // 按队列顺序返回；当前播放项由最大 lastPlayedAt 决定。
-        // createdAt 相同时使用歌曲标识做稳定兜底，避免最近播放时间把歌曲顶到队尾。
-        .sort((a, b) => {
-          const createdAtDiff = (a.createdAt || 0) - (b.createdAt || 0);
-          if (createdAtDiff !== 0) return createdAtDiff;
-          return `${a.source}:${a.songId}`.localeCompare(
-            `${b.source}:${b.songId}`
-          );
-        })
     );
   }
 

@@ -867,9 +867,9 @@ export class D1Storage implements IStorage {
   async listMusicV2History(userName: string): Promise<MusicV2HistoryRecord[]> {
     try {
       const results = await this.db
-        // 按队列顺序返回；当前播放项由最大 last_played_at 决定
+        // 按队列顺序返回（sort_order 由拖拽维护）；当前播放项由最大 last_played_at 决定
         .prepare(
-          'SELECT * FROM music_v2_history WHERE username = ? ORDER BY created_at ASC, id ASC'
+          'SELECT * FROM music_v2_history WHERE username = ? ORDER BY sort_order ASC, created_at ASC, id ASC'
         )
         .bind(userName)
         .all();
@@ -892,6 +892,7 @@ export class D1Storage implements IStorage {
         lastQuality: row.last_quality || undefined,
         createdAt: row.created_at,
         updatedAt: row.updated_at,
+        sortOrder: row.sort_order ?? undefined,
       }));
     } catch (err) {
       console.error('D1Storage.listMusicV2History error:', err);
@@ -909,9 +910,9 @@ export class D1Storage implements IStorage {
           `
           INSERT INTO music_v2_history (
             username, song_id, source, songmid, name, artist, album, cover, duration_text, duration_sec,
-            play_progress_sec, last_played_at, play_count, last_quality, created_at, updated_at
+            play_progress_sec, last_played_at, play_count, last_quality, created_at, updated_at, sort_order
           )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(username, song_id) DO UPDATE SET
             source = excluded.source,
             songmid = excluded.songmid,
@@ -925,7 +926,8 @@ export class D1Storage implements IStorage {
             last_played_at = excluded.last_played_at,
             play_count = excluded.play_count,
             last_quality = excluded.last_quality,
-            updated_at = excluded.updated_at
+            updated_at = excluded.updated_at,
+            sort_order = excluded.sort_order
         `
         )
         .bind(
@@ -944,7 +946,8 @@ export class D1Storage implements IStorage {
           record.playCount,
           record.lastQuality || null,
           record.createdAt,
-          record.updatedAt
+          record.updatedAt,
+          record.sortOrder ?? record.createdAt
         )
         .run();
     } catch (err) {
