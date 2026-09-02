@@ -127,6 +127,7 @@ interface SearchCachePayload {
 type CustomSubtitleEngine = 'native' | 'jassub';
 type PlaybackSourceBadge = 'local' | 'offline' | null;
 type HarmonyHlsPlaybackMode = 'hlsjs' | 'native';
+type NetdiskHlsPlaybackMode = 'hlsjs' | 'native';
 
 interface CustomSubtitleState {
   name: string;
@@ -157,6 +158,7 @@ interface JassubSubtitleInstance {
 
 const PLAYBACK_RATE_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5, 2, 3, 4];
 const HARMONY_HLS_PLAYBACK_MODE_KEY = 'harmony_hls_playback_mode';
+const NETDISK_HLS_PLAYBACK_MODE_KEY = 'netdisk_hls_playback_mode';
 const JASSUB_ASSET_BASE = '/assets/jassub';
 const JASSUB_CJK_FONT_FAMILY = 'noto sans cjk sc';
 const JASSUB_CJK_FONT_URL = `${JASSUB_ASSET_BASE}/NotoSansCJK-Regular.ttc`;
@@ -763,6 +765,18 @@ function PlayPageClient() {
     );
   };
 
+  /** 网盘挂载类源：openlist / xiaoya / netdisk-* 等挂载网盘，视频无广告，可用原生 HLS 直连播放 */
+  const isNetdiskMountSource = (source?: string | null) => {
+    if (!source) return false;
+    return source === 'openlist' || source === 'xiaoya' || isNetdiskSource(source);
+  };
+
+  /** 网盘挂载视频是否启用原生 HLS（仅支持原生 HLS 的浏览器且用户开启时生效） */
+  const isNetdiskNativeHlsActive = (source?: string | null) =>
+    isNetdiskMountSource(source) &&
+    supportsNativeHls &&
+    netdiskHlsPlaybackMode === 'native';
+
   /** 私人影库/网盘类源：配合 moontvplus-extension 跨域媒体模块，供 Anime4K 等读帧 */
   const needsPrivateSourceCrossOrigin = (source?: string | null) => {
     if (!source) return false;
@@ -782,9 +796,11 @@ function PlayPageClient() {
     if (!video) return;
     // 单文件直链（openlist 等探测为 file）：不加 crossorigin=anonymous，
     // 否则跨域 CDN 无 ACAO 时原生播放也会被 CORS 拦截。
+    // 网盘挂载原生 HLS 同样不加：原生 HLS 走 no-cors 媒体请求，加了反而被 CORS 拦。
     if (
       needsPrivateSourceCrossOrigin(source ?? currentSourceRef.current) &&
-      videoMediaTypeRef.current !== 'file'
+      videoMediaTypeRef.current !== 'file' &&
+      !isNetdiskNativeHlsActive(source ?? currentSourceRef.current)
     ) {
       if (video.crossOrigin !== 'anonymous') {
         video.crossOrigin = 'anonymous';
@@ -1620,6 +1636,32 @@ function PlayPageClient() {
     harmonyHlsPlaybackMode === 'native' &&
     externalPlayerAdBlock;
 
+  // 网盘挂载（openlist / xiaoya / netdisk-*）原生 HLS：Edge/Safari 可原生播放 m3u8，
+  // 直连网盘 CDN，无需代理与去广告，播放更快。仅对支持原生 HLS 的浏览器启用。
+  const [supportsNativeHls] = useState(() => {
+    if (typeof window === 'undefined' || typeof document === 'undefined') {
+      return false;
+    }
+    try {
+      const video = document.createElement('video');
+      const result = video.canPlayType?.('application/vnd.apple.mpegurl');
+      return result === 'probably' || result === 'maybe';
+    } catch {
+      return false;
+    }
+  });
+  const [netdiskHlsPlaybackMode, setNetdiskHlsPlaybackMode] =
+    useState<NetdiskHlsPlaybackMode>(() => {
+      if (!supportsNativeHls) return 'hlsjs';
+      try {
+        return localStorage.getItem(NETDISK_HLS_PLAYBACK_MODE_KEY) === 'hlsjs'
+          ? 'hlsjs'
+          : 'native';
+      } catch {
+        return 'native';
+      }
+    });
+
   // 视频清晰度列表
   const [videoQualities, setVideoQualities] = useState<Array<{ name: string, url: string }>>([]);
 
@@ -2030,6 +2072,8 @@ function PlayPageClient() {
   const artRef = useRef<HTMLDivElement | null>(null);
   const activeHarmonyHlsPlaybackModeRef =
     useRef<HarmonyHlsPlaybackMode | null>(null);
+  const activeNetdiskHlsPlaybackModeRef =
+    useRef<NetdiskHlsPlaybackMode | null>(null);
   const activeNativeHlsAdBlockRef = useRef<boolean | null>(null);
   const syncAnime4KCanvasFlip = (flip?: string) => {
     const canvas = anime4kRef.current?.canvas as HTMLCanvasElement | undefined;
@@ -4005,6 +4049,19 @@ function PlayPageClient() {
       // 隐私模式等场景可能禁用 localStorage，但不应阻止本次切换。
     }
     setHarmonyHlsPlaybackMode(mode);
+  };
+
+  const switchNetdiskHlsPlaybackMode = (mode: NetdiskHlsPlaybackMode) => {
+    if (mode === netdiskHlsPlaybackMode) return;
+
+    prepareHarmonyHlsReinit();
+
+    try {
+      localStorage.setItem(NETDISK_HLS_PLAYBACK_MODE_KEY, mode);
+    } catch {
+      // 隐私模式等场景可能禁用 localStorage，但不应阻止本次切换。
+    }
+    setNetdiskHlsPlaybackMode(mode);
   };
 
   const toggleToolbarAdBlock = () => {
@@ -6907,8 +6964,20 @@ function PlayPageClient() {
         (harmonyHlsPlaybackMode === 'native' &&
           activeNativeHlsAdBlockRef.current !== nativeHlsAdBlockEnabled));
 
+    // 网盘挂载切换 HLS 模式时同样需要整体重建（customType 闭包捕获旧模式）
+    const needsNetdiskHlsModeReinit =
+      isNetdiskMountSource(currentSourceRef.current) &&
+      supportsNativeHls &&
+      activeNetdiskHlsPlaybackModeRef.current !== null &&
+      activeNetdiskHlsPlaybackModeRef.current !== netdiskHlsPlaybackMode;
+
     // 非WebKit浏览器且播放器已存在，使用switch方法切换
-    if (!isWebkit && artPlayerRef.current && !needsHarmonyHlsModeReinit) {
+    if (
+      !isWebkit &&
+      artPlayerRef.current &&
+      !needsHarmonyHlsModeReinit &&
+      !needsNetdiskHlsModeReinit
+    ) {
       // 显式设置类型，确保代理 URL 能被 HLS.js 正确处理
       const videoType = getVideoType(videoUrl);
       if (videoType) {
@@ -6928,9 +6997,11 @@ function PlayPageClient() {
       artPlayerRef.current.poster = videoCover;
       if (artPlayerRef.current?.video) {
         const exposedVideoUrl =
-          isHarmonyOS && harmonyHlsPlaybackMode === 'native'
-            ? buildNativeHlsPlaybackUrl(videoUrl)
-            : videoUrl;
+          isNetdiskNativeHlsActive(currentSourceRef.current)
+            ? videoUrl
+            : isHarmonyOS && harmonyHlsPlaybackMode === 'native'
+              ? buildNativeHlsPlaybackUrl(videoUrl)
+              : videoUrl;
         ensureVideoSource(
           artPlayerRef.current.video as HTMLVideoElement,
           exposedVideoUrl
@@ -7168,15 +7239,32 @@ function PlayPageClient() {
             'webkit-playsinline': 'true',
             referrerpolicy: 'no-referrer',
             // 私人影库跨域直链：配合同级 moontvplus-extension 注入 ACAO，供 Anime4K 读帧
-            // 单文件直链（mediaType=file）不加 crossorigin，避免无 ACAO 的 CDN 直链原生播放被 CORS 拦
+            // 单文件直链（mediaType=file）与网盘挂载原生 HLS 不加 crossorigin，
+            // 避免无 ACAO 的 CDN 直链原生播放被 CORS 拦
             ...(needsPrivateSourceCrossOrigin(currentSourceRef.current) &&
-            videoMediaTypeRef.current !== 'file'
+            videoMediaTypeRef.current !== 'file' &&
+            !isNetdiskNativeHlsActive(currentSourceRef.current)
               ? { crossOrigin: 'anonymous' }
               : {}),
           } as any,
           // HLS 支持配置
           customType: {
             m3u8: function (video: HTMLVideoElement, url: string) {
+              // 网盘挂载原生 HLS：直接把 m3u8 交给浏览器原生播放器（Edge/Safari），
+              // 直连网盘 CDN，无需代理与去广告。Anime4K 超分需要读帧时会先用 fetch
+              // 探测，原生模式下已豁免 crossOrigin，可正常播放。
+              if (isNetdiskNativeHlsActive(currentSourceRef.current)) {
+                if (video.hls) {
+                  video.hls.destroy();
+                  delete video.hls;
+                }
+
+                video.src = url;
+                ensureVideoSource(video, url);
+                video.load();
+                return;
+              }
+
               if (isHarmonyOS && harmonyHlsPlaybackMode === 'native') {
                 if (video.hls) {
                   video.hls.destroy();
@@ -9654,12 +9742,19 @@ function PlayPageClient() {
           ? harmonyHlsPlaybackMode
           : 'hlsjs';
         activeNativeHlsAdBlockRef.current = nativeHlsAdBlockEnabled;
+        activeNetdiskHlsPlaybackModeRef.current = isNetdiskMountSource(
+          currentSourceRef.current
+        )
+          ? netdiskHlsPlaybackMode
+          : null;
 
         if (artPlayerRef.current?.video) {
           const exposedVideoUrl =
-            isHarmonyOS && harmonyHlsPlaybackMode === 'native'
-              ? buildNativeHlsPlaybackUrl(videoUrl)
-              : videoUrl;
+            isNetdiskNativeHlsActive(currentSourceRef.current)
+              ? videoUrl
+              : isHarmonyOS && harmonyHlsPlaybackMode === 'native'
+                ? buildNativeHlsPlaybackUrl(videoUrl)
+                : videoUrl;
           ensureVideoSource(
             artPlayerRef.current.video as HTMLVideoElement,
             exposedVideoUrl
@@ -9679,6 +9774,7 @@ function PlayPageClient() {
     blockAdEnabled,
     harmonyHlsPlaybackMode,
     nativeHlsAdBlockEnabled,
+    netdiskHlsPlaybackMode,
   ]);
 
   // 当组件卸载时清理定时器、Wake Lock 和播放器资源
@@ -10759,6 +10855,56 @@ function PlayPageClient() {
                           <span className='whitespace-nowrap'>HLS.js</span>
                         </button>
                       )}
+
+                      {/* 网盘挂载原生 HLS 开关：关闭 HLS.js 使用浏览器原生 HLS 直连，更快且无需代理/去广告 */}
+                      {isNetdiskMountSource(currentSource) &&
+                        supportsNativeHls &&
+                        isHlsPlaybackUrl(videoUrl) && (
+                          <button
+                            type='button'
+                            onClick={() =>
+                              switchNetdiskHlsPlaybackMode(
+                                netdiskHlsPlaybackMode === 'native'
+                                  ? 'hlsjs'
+                                  : 'native'
+                              )
+                            }
+                            aria-pressed={netdiskHlsPlaybackMode === 'native'}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all duration-200 shadow-sm hover:shadow-md cursor-pointer border flex-shrink-0 ${netdiskHlsPlaybackMode === 'native'
+                              ? 'bg-gradient-to-r from-emerald-500 to-teal-600 hover:from-emerald-600 hover:to-teal-700 text-white border-emerald-400'
+                              : 'bg-white hover:bg-gray-100 dark:bg-gray-700 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-200 border-gray-300 dark:border-gray-600'
+                              }`}
+                            title={
+                              netdiskHlsPlaybackMode === 'native'
+                                ? '原生 HLS 已开启（直连网盘，最快），点击切换为 HLS.js'
+                                : '原生 HLS 已关闭（当前使用 HLS.js），点击切换为原生直连'
+                            }
+                          >
+                            <svg
+                              className='w-4 h-4 flex-shrink-0'
+                              fill='none'
+                              stroke='currentColor'
+                              viewBox='0 0 24 24'
+                            >
+                              {netdiskHlsPlaybackMode === 'native' ? (
+                                <path
+                                  strokeLinecap='round'
+                                  strokeLinejoin='round'
+                                  strokeWidth='2'
+                                  d='M13 10V3L4 14h7v7l9-11h-7z'
+                                />
+                              ) : (
+                                <path
+                                  strokeLinecap='round'
+                                  strokeLinejoin='round'
+                                  strokeWidth='2'
+                                  d='M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636'
+                                />
+                              )}
+                            </svg>
+                            <span className='whitespace-nowrap'>原生HLS</span>
+                          </button>
+                        )}
                     </div>
                   </div>
                 </div>
