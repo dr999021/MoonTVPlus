@@ -80,8 +80,9 @@ async function detectOpenListMediaType(
 
   const abortController = new AbortController();
   const timer = setTimeout(() => abortController.abort(), 6000);
+  let response: Response | undefined;
   try {
-    const response = await fetch(playUrl, {
+    response = await fetch(playUrl, {
       headers: {
         'user-agent':
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
@@ -113,6 +114,7 @@ async function detectOpenListMediaType(
     return 'unknown';
   } finally {
     clearTimeout(timer);
+    response?.body?.cancel().catch(() => {});
   }
 }
 

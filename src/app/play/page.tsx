@@ -3484,6 +3484,7 @@ function PlayPageClient() {
     const isEpisodeSwitchRequest = lastVideoRequestKeyRef.current !== requestKey;
     lastVideoRequestKeyRef.current = requestKey;
     const requestSeq = ++videoUrlRequestSeqRef.current;
+    videoMediaTypeRef.current = '';
 
     let newUrl = detailData?.episodes[episodeIndex] || '';
     let nextPlaybackSourceBadge: PlaybackSourceBadge = null;
