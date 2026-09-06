@@ -2246,32 +2246,45 @@ export const UserMenu: React.FC = () => {
 
   // ---------- 本地设置云同步 ----------
 
-  // 初始化：探测全局模式
+  // 初始化：读取根布局注入的全局模式
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const res = await fetch('/api/local-settings-sync?mode=config', {
-          cache: 'no-store',
-        });
-        if (!res.ok) return;
-        const data = await res.json();
-        if (cancelled) return;
-        setSyncAvailable(Boolean(data.enabled));
-        setSyncMode(data.mode === 'manual' || data.mode === 'auto' ? data.mode : 'off');
+    const runtimeConfig = (window as any).RUNTIME_CONFIG || {};
+    const mode =
+      runtimeConfig.LOCAL_SETTINGS_SYNC_MODE === 'manual' ||
+      runtimeConfig.LOCAL_SETTINGS_SYNC_MODE === 'auto'
+        ? runtimeConfig.LOCAL_SETTINGS_SYNC_MODE
+        : 'off';
+    const storageType = runtimeConfig.STORAGE_TYPE || 'localstorage';
+    const supportedStorageTypes = new Set([
+      'd1',
+      'postgres',
+      'turso',
+      'redis',
+      'upstash',
+      'kvrocks',
+    ]);
+    const username = getAuthInfoFromBrowserCookie()?.username;
+    const enabled =
+      supportedStorageTypes.has(storageType) &&
+      Boolean(username) &&
+      mode !== 'off';
 
-        // 自动模式：进入网站时拉取云端副本
-        if (data.mode === 'auto' && data.enabled) {
-          await pullRemoteSettings(false);
-        }
-      } catch {
-        // 探测失败则视为关闭
+    setSyncAvailable(enabled);
+    setSyncMode(mode);
+
+    // 自动模式：同一用户在当前页面生命周期内只恢复一次，两个 UserMenu 实例共享同一请求。
+    if (mode === 'auto' && enabled && username) {
+      const syncState = (window as any).__moontvLocalSettingsAutoPull as
+        | { username: string; promise: Promise<boolean> }
+        | undefined;
+      if (!syncState || syncState.username !== username) {
+        (window as any).__moontvLocalSettingsAutoPull = {
+          username,
+          promise: pullRemoteSettings(false),
+        };
       }
-    })();
-    return () => {
-      cancelled = true;
-    };
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
