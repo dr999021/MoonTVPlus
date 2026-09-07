@@ -794,13 +794,12 @@ function PlayPageClient() {
     source?: string | null
   ) => {
     if (!video) return;
-    // 单文件直链（openlist 等探测为 file）：不加 crossorigin=anonymous，
-    // 否则跨域 CDN 无 ACAO 时原生播放也会被 CORS 拦截。
-    // 网盘挂载原生 HLS 同样不加：原生 HLS 走 no-cors 媒体请求，加了反而被 CORS 拦。
+    // 私人影库/网盘类直链先乐观 CORS 模式加载：配「moontvplus 扩展」注入 ACAO，
+    // Anime4K 才能读帧超分。单文件直链（openlist file）/网盘挂载原生 HLS 也先试
+    // CORS，无 ACAO 的 CDN 首次播放 error 时一次性回退 no-cors（见 error 处理器）。
     if (
       needsPrivateSourceCrossOrigin(source ?? currentSourceRef.current) &&
-      videoMediaTypeRef.current !== 'file' &&
-      !isNetdiskNativeHlsActive(source ?? currentSourceRef.current)
+      !mediaCorsFallbackRef.current
     ) {
       if (video.crossOrigin !== 'anonymous') {
         video.crossOrigin = 'anonymous';
@@ -1672,6 +1671,10 @@ function PlayPageClient() {
   const refreshTimerRef = useRef<NodeJS.Timeout | null>(null); // 14分钟定时器
   const currentXiaoyaUrlRef = useRef<string>(''); // 当前xiaoya原始URL（用于刷新）
   const videoMediaTypeRef = useRef<'hls' | 'file' | ''>(''); // 播放链接媒体类型（openlist 探测后注入，用于单文件直连分流）
+  // 当前视频是否已因 CORS 失败回退 no-cors（无扩展注入 ACAO 的 CDN 直链）。
+  // 先乐观设置 crossOrigin（配 moontvplus-extension 注入 ACAO 供 Anime4K 读帧），
+  // 首次播放 error 时一次性回退，之后不再恢复 crossOrigin。切集/换源时重置。
+  const mediaCorsFallbackRef = useRef(false);
   const isInitialLoadRef = useRef(true); // 标记是否为首次加载
   // xiaoya 仅 m3u8 可续期；openlist 由 refresh14m 决定。用于 startRefreshTimer 自身兜底校验
   const linkRefreshEligibleRef = useRef(false);
@@ -3542,6 +3545,7 @@ function PlayPageClient() {
     lastVideoRequestKeyRef.current = requestKey;
     const requestSeq = ++videoUrlRequestSeqRef.current;
     videoMediaTypeRef.current = '';
+    mediaCorsFallbackRef.current = false;
 
     let newUrl = detailData?.episodes[episodeIndex] || '';
     let nextPlaybackSourceBadge: PlaybackSourceBadge = null;
@@ -7264,12 +7268,11 @@ function PlayPageClient() {
             playsInline: true,
             'webkit-playsinline': 'true',
             referrerpolicy: 'no-referrer',
-            // 私人影库跨域直链：配合同级 moontvplus-extension 注入 ACAO，供 Anime4K 读帧
-            // 单文件直链（mediaType=file）与网盘挂载原生 HLS 不加 crossorigin，
-            // 避免无 ACAO 的 CDN 直链原生播放被 CORS 拦
+            // 私人影库/网盘直链：配合同级 moontvplus-extension 注入 ACAO，供 Anime4K 读帧。
+            // 单文件直链（mediaType=file）与网盘挂载原生 HLS 也先乐观 CORS，
+            // 无 ACAO 的 CDN 首次播放 error 时一次性回退 no-cors（见 error 处理器）。
             ...(needsPrivateSourceCrossOrigin(currentSourceRef.current) &&
-            videoMediaTypeRef.current !== 'file' &&
-            !isNetdiskNativeHlsActive(currentSourceRef.current)
+            !mediaCorsFallbackRef.current
               ? { crossOrigin: 'anonymous' }
               : {}),
           } as any,
@@ -7277,8 +7280,9 @@ function PlayPageClient() {
           customType: {
             m3u8: function (video: HTMLVideoElement, url: string) {
               // 网盘挂载原生 HLS：直接把 m3u8 交给浏览器原生播放器（Edge/Safari），
-              // 直连网盘 CDN，无需代理与去广告。Anime4K 超分需要读帧时会先用 fetch
-              // 探测，原生模式下已豁免 crossOrigin，可正常播放。
+              // 直连网盘 CDN，无需代理与去广告。此时 video 已乐观带上 crossOrigin
+              // （配合扩展注入 ACAO 供 Anime4K 读帧）；无 ACAO 时首次播放 error
+              // 会触发一次性 no-cors 回退，见 error 处理器。
               if (isNetdiskNativeHlsActive(currentSourceRef.current)) {
                 if (video.hls) {
                   video.hls.destroy();
@@ -9596,6 +9600,44 @@ function PlayPageClient() {
 
         artPlayerRef.current.on('error', (err: any) => {
           console.error('播放器错误:', err);
+          // CORS 回退（单文件直链/网盘挂载原生 HLS）：乐观设置的 crossOrigin 在
+          // 无 ACAO 的 CDN 上首次播放即失败，去掉 crossOrigin 以 no-cors 重试一次。
+          // 必须放在 currentTime 守卫与 HLS 分流之前，覆盖原生 HLS 的 m3u8 失败。
+          {
+            const fallbackVideo = artPlayerRef.current
+              ?.video as HTMLVideoElement | undefined;
+            if (
+              fallbackVideo &&
+              (artPlayerRef.current?.currentTime || 0) === 0 &&
+              fallbackVideo.crossOrigin === 'anonymous' &&
+              !mediaCorsFallbackRef.current &&
+              (videoMediaTypeRef.current === 'file' ||
+                isNetdiskNativeHlsActive(currentSourceRef.current))
+            ) {
+              mediaCorsFallbackRef.current = true;
+              console.warn(
+                '[play] CORS 模式播放失败，回退 no-cors（无扩展/无 ACAO 的 CDN）'
+              );
+              try {
+                fallbackVideo.crossOrigin = null;
+              } catch {
+                // ignore
+              }
+              const fallbackUrl =
+                artPlayerRef.current?.option?.url || videoUrl;
+              ensureVideoSource(fallbackVideo, fallbackUrl);
+              fallbackVideo.load();
+              try {
+                const playPromise = fallbackVideo.play();
+                if (playPromise && typeof playPromise.catch === 'function') {
+                  playPromise.catch(() => {});
+                }
+              } catch {
+                // ignore
+              }
+              return;
+            }
+          }
           // 如果已经成功播放过一段时间，忽略后续错误（可能是短暂网络波动）
           if (artPlayerRef.current && artPlayerRef.current.currentTime > 0) {
             return;
