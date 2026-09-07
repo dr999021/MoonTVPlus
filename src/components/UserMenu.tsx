@@ -2451,7 +2451,7 @@ export const UserMenu: React.FC = () => {
   };
 
   // 把云端 payload 写回 localStorage（不触发服务端，仅本地生效）
-  const applyRemotePayload = (payload: LocalSettingsPayload | null) => {
+  const applyRemotePayloadCore = (payload: LocalSettingsPayload | null) => {
     if (!payload || typeof payload.data !== 'object') return;
     if (typeof window === 'undefined') return;
     for (const key of Object.keys(payload.data)) {
@@ -2606,6 +2606,37 @@ export const UserMenu: React.FC = () => {
       // 忽略
     }
   };
+
+  // 应用远端 payload：写 localStorage + 广播事件，让所有 UserMenu 实例同步状态
+  const applyRemotePayload = (payload: LocalSettingsPayload | null) => {
+    if (!payload || typeof payload.data !== 'object') return;
+    if (typeof window === 'undefined') return;
+    applyRemotePayloadCore(payload);
+    // 页面上存在多个 UserMenu 实例（桌面端/移动端），
+    // 仅发起拉取的那个实例会更新 state，其余实例通过事件同步
+    window.dispatchEvent(
+      new CustomEvent('moontv_local_settings_applied', {
+        detail: { payload },
+      })
+    );
+  };
+
+  // 监听其他实例的恢复广播，同步本实例状态
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ payload?: LocalSettingsPayload }>)
+        .detail;
+      if (detail?.payload) {
+        applyRemotePayloadCore(detail.payload);
+      }
+    };
+    window.addEventListener('moontv_local_settings_applied', handler);
+    return () => {
+      window.removeEventListener('moontv_local_settings_applied', handler);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // 云同步结果以 Toast 展示
   const showSyncToast = (text: string, ok: boolean) => {
