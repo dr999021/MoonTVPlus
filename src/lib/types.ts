@@ -18,6 +18,7 @@ export interface PlayRecord {
   origin?: 'vod' | 'live';
   /** 是否动漫（写入时根据 CMS type_name/class 判断） */
   is_anime?: boolean;
+  progress?: string;
 }
 
 // 收藏数据结构
