@@ -101,7 +101,27 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-
+// ===== 补全缺失字段 =====
+if (!record.total_episodes || !record.play_time || !record.total_time) {
+  if (record.progress && typeof record.progress === 'string') {
+    const parts = record.progress.split('/');
+    if (parts.length === 2) {
+      const current = parseInt(parts[0], 10);
+      const total = parseInt(parts[1], 10);
+      if (!isNaN(current)) {
+        record.play_time = current;           // 当前播放集数
+        record.total_episodes = total;        // 总集数
+        record.total_time = total * 1200;     // 假设每集20分钟（单位秒）
+      }
+    }
+  }
+  // 如果还是没有，给默认值，避免 SQL 报错
+  record.total_episodes = record.total_episodes ?? 0;
+  record.play_time = record.play_time ?? 0;
+  record.total_time = record.total_time ?? 0;
+  record.is_anime = record.is_anime ?? 1;    // 默认是动漫
+}
+// ===== 补全结束 =====
     const finalRecord = {
       ...record,
       save_time: record.save_time ?? Date.now(),
