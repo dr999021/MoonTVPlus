@@ -119,7 +119,7 @@ if (!record.total_episodes || !record.play_time || !record.total_time) {
   record.total_episodes = record.total_episodes ?? 0;
   record.play_time = record.play_time ?? 0;
   record.total_time = record.total_time ?? 0;
-  record.is_anime = record.is_anime ?? 1;    // 默认是动漫
+  record.is_anime = record.is_anime ?? true;    // 默认是动漫
 }
 // ===== 补全结束 =====
     const finalRecord = {
